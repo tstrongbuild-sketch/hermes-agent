@@ -2111,7 +2111,7 @@ def _resolve_codex_credential_and_base(*, model: Optional[str] = None) -> Tuple[
     override = _codex_base_url_override()
     pool_present, entry = _select_pool_entry("openai-codex", model=model)
     if pool_present:
-        token = _pool_runtime_api_key(entry)
+        token = available_pool_fallback_token("openai-codex", _pool_runtime_api_key(entry), model)
         if token:
             if override:
                 return token, override
@@ -3058,7 +3058,7 @@ def _try_anthropic(explicit_api_key: Optional[Union[str, Callable[[], str]]] = N
         return None, None
     # Honor config.yaml model.base_url only when provider is anthropic AND the URL is
     # Anthropic-compatible; a foreign host (Codex, OpenRouter) would 401 every aux call.
-    base_url = _pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if pool_present else _ANTHROPIC_DEFAULT_BASE_URL
+    base_url = pool_fallback_base_url(token, entry, _ANTHROPIC_DEFAULT_BASE_URL)
     with contextlib.suppress(Exception):
         from hermes_cli.config import load_config_readonly
         cfg = load_config_readonly()

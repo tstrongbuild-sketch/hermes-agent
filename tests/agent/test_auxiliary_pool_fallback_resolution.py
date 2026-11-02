@@ -293,3 +293,90 @@ def test_ranked_fingerprint_cooldown_matches_concrete_key(home, route, same_key,
     assert known["model_cooldowns"] == {cooldown_model: until}
     assert known["secret_fingerprint"] == fingerprint_secret_value(key)
     assert not known.get("access_token")
+
+
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("cooldown_model", [MODEL, OTHER])
+@pytest.mark.parametrize("malformed", [False, True])
+def test_codex_selected_reseeded_singleton_obeys_persisted_identity(
+    home, monkeypatch, route, same_key, cooldown_model, malformed,
+):
+    from agent.credential_persistence import fingerprint_secret_value
+
+    root, built = home
+    key, singleton, until = _store(root, "openai-codex", cooldown_model, distinct=not same_key)
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    known = store["credential_pool"]["openai-codex"][0]
+    known["source"] = "manual"
+    known.pop("access_token")
+    known["secret_fingerprint"] = fingerprint_secret_value(key)
+    store["credential_pool"]["openai-codex"] = [known, {
+        "id": "unrelated", "source": "manual", "priority": "not-a-number" if malformed else 1,
+        "auth_type": "api_key", "access_token": "synthetic-unrelated-key",
+        "last_status": "exhausted", "last_error_code": 401, "last_status_at": time.time(),
+    }]
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+    endpoint = "https://singleton-gateway.example/v1"
+    monkeypatch.setenv("HERMES_CODEX_BASE_URL", endpoint)
+    if malformed:
+        with pytest.raises(TypeError):
+            load_pool("openai-codex")
+    else:
+        pool = load_pool("openai-codex")
+        seeded = next(row for row in pool.entries() if row.source == "device_code")
+        assert seeded.runtime_api_key == singleton
+        selected = pool.select(model=MODEL)
+        assert selected is not None and selected.runtime_api_key == singleton
+    if route == "fallback":
+        result = aux._resolve_fallback_entry({"provider": "openai-codex", "model": MODEL})
+    else:
+        result = aux.resolve_provider_client("openai-codex", model=MODEL)
+    if same_key and cooldown_model == MODEL:
+        assert result == (None, None) and built == []
+    else:
+        assert result[0] is not None and result[1] == MODEL
+        assert built[-1]["api_key"] == singleton
+        assert built[-1]["base_url"] == endpoint
+    after = json.loads((root / "auth.json").read_text(encoding="utf-8"))["credential_pool"]["openai-codex"]
+    retained = next(row for row in after if row["id"] == "pooled")
+    assert retained["secret_fingerprint"] == fingerprint_secret_value(key)
+    assert retained["model_cooldowns"] == {cooldown_model: until}
+    assert not retained.get("access_token")
+
+
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("caller_url", ["", "https://caller-relay.example/anthropic", "https://foreign.example/v1"])
+def test_anthropic_explicit_key_owns_its_pool_endpoint(home, monkeypatch, route, same_key, caller_url):
+    root, built = home
+    key, other_key, until = _store(root, "anthropic", OTHER, distinct=True)
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    relay = "https://pool-a-relay.example/anthropic"
+    store["credential_pool"]["anthropic"][0]["base_url"] = relay
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+
+    def client(token, base_url):
+        built.append({"api_key": token, "base_url": base_url})
+        return SimpleNamespace()
+
+    monkeypatch.setattr("agent.anthropic_adapter.build_anthropic_client", client)
+    selected = load_pool("anthropic").select(model=MODEL)
+    assert selected is not None and selected.runtime_api_key == key
+    explicit_key = key if same_key else other_key
+    if route == "fallback":
+        result = aux._resolve_fallback_entry({
+            "provider": "anthropic", "model": MODEL, "api_key": explicit_key, "base_url": caller_url,
+        })
+    else:
+        result = aux.resolve_provider_client(
+            "anthropic", model=MODEL, explicit_api_key=explicit_key, explicit_base_url=caller_url or None,
+        )
+    if caller_url == "https://foreign.example/v1":
+        assert result == (None, None) and built == []
+    else:
+        assert result[0] is not None and result[1] == MODEL
+        assert built[-1]["api_key"] == explicit_key
+        expected = caller_url or (relay if same_key else aux._ANTHROPIC_DEFAULT_BASE_URL)
+        assert built[-1]["base_url"] == expected
+    _assert_cooldown(root, "anthropic", key, OTHER, until)
