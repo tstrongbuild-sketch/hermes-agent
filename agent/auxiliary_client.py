@@ -128,10 +128,10 @@ from agent.auxiliary_unavailable import (
     AuxiliaryClientUnavailable, clear_nous_credential_failure, missing_provider_credentials_message,
     nous_credential_failure_detail, record_nous_credential_failure)
 from hermes_constants import OPENROUTER_BASE_URL, hermes_home_key
+from agent.auxiliary_pool_fallback import available_pool_fallback_token
 from utils import base_url_host_matches, base_url_hostname, base_url_origin, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
-
 
 # resolve_provider_client fall-through dedup: misconfigured-provider warnings fire on every
 # retry, so only the first per process surfaces. Separate sets let tests clear each branch.
@@ -2119,7 +2119,7 @@ def _resolve_codex_credential_and_base(*, model: Optional[str] = None) -> Tuple[
             from hermes_cli.auth_codex import _codex_pool_route_base_url
             return token, _codex_pool_route_base_url(_pool_runtime_base_url(entry))
     # No usable pool token: auth.json only (re-selecting could pair another row's key with the default).
-    return _read_codex_singleton_token(), override or _CODEX_AUX_BASE_URL
+    return available_pool_fallback_token("openai-codex", _read_codex_singleton_token(), model), override or _CODEX_AUX_BASE_URL
 
 
 def _read_codex_singleton_token() -> Optional[str]:
@@ -2315,7 +2315,7 @@ def _try_openrouter(explicit_api_key: Optional[Union[str, Callable[[], str]]] = 
     override_url = (explicit_base_url or "").strip().rstrip("/")
     pool_present, entry = _select_pool_entry("openrouter", model=or_model)
     if pool_present:
-        or_key = explicit_api_key or _pool_runtime_api_key(entry)
+        or_key = available_pool_fallback_token("openrouter", explicit_api_key or _pool_runtime_api_key(entry), or_model)
         if or_key:
             base_url = override_url or _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
             logger.debug("Auxiliary client: OpenRouter via pool")
@@ -2324,7 +2324,7 @@ def _try_openrouter(explicit_api_key: Optional[Union[str, Callable[[], str]]] = 
             ), or_model
         # Exhausted pool: fall through to OPENROUTER_API_KEY rather than fail.
         logger.debug("Auxiliary client: OpenRouter pool exhausted, trying OPENROUTER_API_KEY")
-    or_key = explicit_api_key or _scoped_key_env("OPENROUTER_API_KEY")
+    or_key = available_pool_fallback_token("openrouter", explicit_api_key or _scoped_key_env("OPENROUTER_API_KEY"), or_model)
     if not or_key:
         _mark_provider_unhealthy(
             "openrouter", ttl=60, reason=_describe_openrouter_unavailable(or_model), level=logging.DEBUG)
