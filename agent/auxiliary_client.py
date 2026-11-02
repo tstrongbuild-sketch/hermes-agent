@@ -128,7 +128,7 @@ from agent.auxiliary_unavailable import (
     AuxiliaryClientUnavailable, clear_nous_credential_failure, missing_provider_credentials_message,
     nous_credential_failure_detail, record_nous_credential_failure)
 from hermes_constants import OPENROUTER_BASE_URL, hermes_home_key
-from agent.auxiliary_pool_fallback import available_pool_fallback_token, pool_fallback_base_url
+from agent.auxiliary_pool_fallback import available_pool_fallback_token, configured_endpoint_matches_token, pool_fallback_base_url
 from utils import base_url_host_matches, base_url_hostname, base_url_origin, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
@@ -3065,7 +3065,7 @@ def _try_anthropic(explicit_api_key: Optional[Union[str, Callable[[], str]]] = N
         model_cfg = cfg.get("model")
         if isinstance(model_cfg, dict):
             cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
-            if cfg_provider == "anthropic":
+            if cfg_provider == "anthropic" and configured_endpoint_matches_token(token, model_cfg.get("api_key"), explicit_api_key):
                 cfg_base_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
                 if cfg_base_url and _is_anthropic_compatible_host(cfg_base_url):
                     base_url = cfg_base_url

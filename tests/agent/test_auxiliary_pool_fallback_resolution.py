@@ -348,13 +348,20 @@ def test_codex_selected_reseeded_singleton_obeys_persisted_identity(
 @pytest.mark.parametrize("route", ["explicit", "fallback"])
 @pytest.mark.parametrize("same_key", [True, False])
 @pytest.mark.parametrize("caller_url", ["", "https://caller-relay.example/anthropic", "https://foreign.example/v1"])
-def test_anthropic_explicit_key_owns_its_pool_endpoint(home, monkeypatch, route, same_key, caller_url):
+@pytest.mark.parametrize("configured", [False, True], ids=["pool_only", "configured_main_endpoint"])
+def test_anthropic_explicit_key_owns_its_pool_endpoint(home, monkeypatch, route, same_key, caller_url, configured):
     root, built = home
     key, other_key, until = _store(root, "anthropic", OTHER, distinct=True)
     store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
     relay = "https://pool-a-relay.example/anthropic"
-    store["credential_pool"]["anthropic"][0]["base_url"] = relay
+    store["credential_pool"]["anthropic"][0]["base_url"] = (
+        "https://pool-row.example/anthropic" if configured and same_key else relay
+    )
     (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+    if configured:
+        cfg = json.loads((root / "config.yaml").read_text(encoding="utf-8"))
+        cfg["model"].update({"api_key": key, "base_url": relay})
+        (root / "config.yaml").write_text(json.dumps(cfg), encoding="utf-8")
 
     def client(token, base_url):
         built.append({"api_key": token, "base_url": base_url})

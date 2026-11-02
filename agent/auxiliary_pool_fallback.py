@@ -44,3 +44,11 @@ def pool_fallback_base_url(token: Any, entry: Any, default: str) -> str:
     if token != _pool_runtime_api_key(entry):
         return default
     return _pool_runtime_base_url(entry, default) or default
+
+
+def configured_endpoint_matches_token(token: Any, configured_key: Any, explicit_key: Any) -> bool:
+    """A configured endpoint owns its configured key, not a distinct caller's key."""
+    from agent.auxiliary_client import _normalize_api_key
+
+    key = _normalize_api_key(configured_key)
+    return token == key if key else not explicit_key
