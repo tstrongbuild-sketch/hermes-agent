@@ -201,3 +201,53 @@ def test_openrouter_explicit_key_keeps_its_own_endpoint(home, route, same_key, o
     assert built[-1]["api_key"] == explicit_key
     assert built[-1]["base_url"] == (override or (relay if same_key else aux.OPENROUTER_BASE_URL))
     _assert_cooldown(root, "openrouter", key, OTHER, until)
+
+
+@pytest.mark.parametrize("provider", ["openai-codex", "openrouter", "anthropic"])
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("fingerprint_only", [True, False])
+def test_malformed_pool_priority_preserves_distinct_fallback_and_known_rejection(
+    home, monkeypatch, provider, route, same_key, fingerprint_only,
+):
+    from agent.credential_persistence import fingerprint_secret_value
+
+    root, built = home
+    key, fallback, until = _store(root, provider, MODEL, distinct=not same_key, env=monkeypatch)
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    rows = store["credential_pool"][provider]
+    if fingerprint_only:
+        rows[0].pop("access_token")
+        rows[0]["secret_fingerprint"] = fingerprint_secret_value(key)
+    rows.append({
+        "id": "malformed", "source": "manual", "priority": "not-a-number",
+        "auth_type": "api_key", "access_token": "synthetic-unrelated-key",
+    })
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+
+    def client(token, base_url):
+        built.append({"api_key": token, "base_url": base_url})
+        return SimpleNamespace()
+
+    monkeypatch.setattr("agent.anthropic_adapter.build_anthropic_client", client)
+    # The real first selection already handles this store error without raising.
+    with pytest.raises(TypeError):
+        load_pool(provider)
+    assert aux._select_pool_entry(provider, model=MODEL) == (False, None)
+    if route == "fallback":
+        entry = {"provider": provider, "model": MODEL}
+        if provider == "anthropic":
+            entry["api_key"] = fallback
+        result = aux._resolve_fallback_entry(entry)
+    else:
+        result = aux.resolve_provider_client(
+            provider, model=MODEL, explicit_api_key=fallback if provider == "anthropic" else None,
+        )
+    if same_key:
+        assert result == (None, None) and built == []
+    else:
+        assert result[0] is not None and result[1] == MODEL
+        assert built[-1]["api_key"] == fallback != key
+    after = json.loads((root / "auth.json").read_text(encoding="utf-8"))["credential_pool"][provider]
+    assert next(row for row in after if row["id"] == "pooled")["model_cooldowns"] == {MODEL: until}
+    assert next(row for row in after if row["id"] == "malformed")["priority"] == "not-a-number"
