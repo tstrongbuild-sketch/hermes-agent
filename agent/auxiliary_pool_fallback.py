@@ -46,9 +46,7 @@ def pool_fallback_base_url(token: Any, entry: Any, default: str) -> str:
     return _pool_runtime_base_url(entry, default) or default
 
 
-def configured_endpoint_matches_token(token: Any, configured_key: Any, explicit_key: Any) -> bool:
-    """A configured endpoint owns its configured key, not a distinct caller's key."""
-    from agent.auxiliary_client import _normalize_api_key
-
-    key = _normalize_api_key(configured_key)
+def configured_endpoint_matches_token(token: Any, model_config: dict[str, Any], explicit_key: Any) -> bool:
+    """Use runtime identity precedence (api_key, then api) before endpoint ownership."""
+    key = next((v.strip() for v in (model_config.get("api_key"), model_config.get("api")) if isinstance(v, str) and v.strip()), "")
     return token == key if key else not explicit_key

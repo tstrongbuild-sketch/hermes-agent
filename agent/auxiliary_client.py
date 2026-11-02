@@ -3065,7 +3065,7 @@ def _try_anthropic(explicit_api_key: Optional[Union[str, Callable[[], str]]] = N
         model_cfg = cfg.get("model")
         if isinstance(model_cfg, dict):
             cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
-            if cfg_provider == "anthropic" and configured_endpoint_matches_token(token, model_cfg.get("api_key"), explicit_api_key):
+            if cfg_provider == "anthropic" and configured_endpoint_matches_token(token, model_cfg, explicit_api_key):
                 cfg_base_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
                 if cfg_base_url and _is_anthropic_compatible_host(cfg_base_url):
                     base_url = cfg_base_url

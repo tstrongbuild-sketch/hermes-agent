@@ -387,3 +387,50 @@ def test_anthropic_explicit_key_owns_its_pool_endpoint(home, monkeypatch, route,
         expected = caller_url or (relay if same_key else aux._ANTHROPIC_DEFAULT_BASE_URL)
         assert built[-1]["base_url"] == expected
     _assert_cooldown(root, "anthropic", key, OTHER, until)
+
+
+@pytest.mark.parametrize("route", ["public", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("identity", ["api_key", "api", "both", "blank_primary", "invalid_primary"])
+def test_anthropic_configured_identity_aliases_preserve_ordinary_endpoint(
+    home, monkeypatch, route, same_key, identity,
+):
+    from agent.credential_persistence import fingerprint_secret_value
+
+    root, built = home
+    key, other_key, until = _store(root, "anthropic", OTHER, distinct=True)
+    selected_key = key if same_key else other_key
+    owned_url = "https://credential-selected.example/anthropic"
+    configured_url = "https://configured-a.example/anthropic"
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    row = store["credential_pool"]["anthropic"][0]
+    row.update({"access_token": selected_key, "base_url": owned_url,
+                "secret_fingerprint": fingerprint_secret_value(selected_key)})
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+    cfg = json.loads((root / "config.yaml").read_text(encoding="utf-8"))
+    cfg["model"].update({"base_url": configured_url, **{
+        "api_key": {"api_key": key},
+        "api": {"api": key},
+        "both": {"api_key": key, "api": other_key},
+        "blank_primary": {"api_key": "   ", "api": f"  {key}  "},
+        "invalid_primary": {"api_key": None, "api": key},
+    }[identity]})
+    (root / "config.yaml").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def client(token, base_url):
+        built.append({"api_key": token, "base_url": base_url})
+        return SimpleNamespace()
+
+    monkeypatch.setattr("agent.anthropic_adapter.build_anthropic_client", client)
+    selected = load_pool("anthropic").select(model=MODEL)
+    assert selected is not None and selected.runtime_api_key == selected_key
+    if route == "fallback":
+        result = aux._resolve_fallback_entry({"provider": "anthropic", "model": MODEL})
+    else:
+        result = aux.resolve_provider_client("anthropic", model=MODEL)
+    assert result[0] is not None and result[1] == MODEL
+    assert built[-1]["api_key"] == selected_key
+    assert built[-1]["base_url"] == (configured_url if same_key else owned_url)
+    _assert_cooldown(root, "anthropic", selected_key, OTHER, until)
+    after = json.loads((root / "auth.json").read_text(encoding="utf-8"))["credential_pool"]["anthropic"]
+    assert next(row for row in after if row["id"] == "pooled")["secret_fingerprint"] == fingerprint_secret_value(selected_key)
