@@ -251,3 +251,45 @@ def test_malformed_pool_priority_preserves_distinct_fallback_and_known_rejection
     after = json.loads((root / "auth.json").read_text(encoding="utf-8"))["credential_pool"][provider]
     assert next(row for row in after if row["id"] == "pooled")["model_cooldowns"] == {MODEL: until}
     assert next(row for row in after if row["id"] == "malformed")["priority"] == "not-a-number"
+
+
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("cooldown_model", [MODEL, OTHER])
+@pytest.mark.parametrize("malformed", [False, True])
+def test_ranked_fingerprint_cooldown_matches_concrete_key(home, route, same_key, cooldown_model, malformed):
+    from agent.credential_persistence import fingerprint_secret_value
+
+    root, built = home
+    key, other_key, until = _store(root, "openrouter", cooldown_model, distinct=True)
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    rows = store["credential_pool"]["openrouter"]
+    rows[0].pop("access_token")
+    rows[0]["secret_fingerprint"] = fingerprint_secret_value(key)
+    rows.append({
+        "id": "unrelated", "source": "manual", "priority": "not-a-number" if malformed else 1,
+        "auth_type": "api_key", "access_token": "synthetic-unrelated-key",
+    })
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+    if malformed:
+        with pytest.raises(TypeError):
+            load_pool("openrouter")
+        assert aux._select_pool_entry("openrouter", model=MODEL) == (False, None)
+    else:
+        selected = load_pool("openrouter").select(model=MODEL)
+        assert selected is not None and selected.runtime_api_key == "synthetic-unrelated-key"
+    explicit_key = key if same_key else other_key
+    if route == "fallback":
+        result = aux._resolve_fallback_entry({"provider": "openrouter", "model": MODEL, "api_key": explicit_key})
+    else:
+        result = aux.resolve_provider_client("openrouter", model=MODEL, explicit_api_key=explicit_key)
+    if same_key and cooldown_model == MODEL:
+        assert result == (None, None) and built == []
+    else:
+        assert result[0] is not None and result[1] == MODEL
+        assert built[-1]["api_key"] == explicit_key
+    after = json.loads((root / "auth.json").read_text(encoding="utf-8"))["credential_pool"]["openrouter"]
+    known = next(row for row in after if row["id"] == "pooled")
+    assert known["model_cooldowns"] == {cooldown_model: until}
+    assert known["secret_fingerprint"] == fingerprint_secret_value(key)
+    assert not known.get("access_token")

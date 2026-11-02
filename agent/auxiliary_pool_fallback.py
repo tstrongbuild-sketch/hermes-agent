@@ -17,7 +17,7 @@ def available_pool_fallback_token(provider: str, token: Any, model: Optional[str
     except TypeError:
         # A malformed priority can break ranking, not invalidate a distinct fallback key.
         return _available_unranked_fallback_token(provider, token, model)
-    return None if pool.token_is_blocked(token, model=model) else token
+    return None if pool.token_is_blocked(token, model=model) else _available_unranked_fallback_token(provider, token, model)
 
 
 def _available_unranked_fallback_token(provider: str, token: str, model: str) -> Optional[str]:
