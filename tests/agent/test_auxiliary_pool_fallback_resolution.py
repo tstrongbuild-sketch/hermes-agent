@@ -149,3 +149,55 @@ def test_openrouter_explicit_fallback_obeys_model_and_endpoint(home, same_key):
         assert built[-1]["api_key"] == fallback != key
         assert built[-1]["base_url"] == "https://synthetic-router.example/v1"
     _assert_cooldown(root, "openrouter", key, MODEL, until)
+
+
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+def test_anthropic_explicit_key_obeys_native_requested_cooldown(home, monkeypatch, route, same_key):
+    root, built = home
+    key, fallback, until = _store(root, "anthropic", MODEL, distinct=not same_key)
+
+    def client(token, base_url):
+        built.append({"api_key": token, "base_url": base_url})
+        return SimpleNamespace()
+
+    monkeypatch.setattr("agent.anthropic_adapter.build_anthropic_client", client)
+    pool = load_pool("anthropic")
+    assert pool.select(model=MODEL) is None
+    assert pool.token_is_blocked(key, model=MODEL)
+    if route == "fallback":
+        result = aux._resolve_fallback_entry({"provider": "anthropic", "model": MODEL, "api_key": fallback})
+    else:
+        result = aux.resolve_provider_client("anthropic", model=MODEL, explicit_api_key=fallback)
+    if same_key:
+        assert result == (None, None) and built == []
+    else:
+        assert result[0] is not None and result[1] == MODEL
+        assert built[-1]["api_key"] == fallback != key
+    _assert_cooldown(root, "anthropic", key, MODEL, until)
+
+
+@pytest.mark.parametrize("route", ["explicit", "fallback"])
+@pytest.mark.parametrize("same_key", [True, False])
+@pytest.mark.parametrize("override", ["", "https://explicit-router.example/v1"])
+def test_openrouter_explicit_key_keeps_its_own_endpoint(home, route, same_key, override):
+    root, built = home
+    key, other_key, until = _store(root, "openrouter", OTHER, distinct=True)
+    store = json.loads((root / "auth.json").read_text(encoding="utf-8"))
+    relay = "https://pool-a-relay.example/v1"
+    store["credential_pool"]["openrouter"][0]["base_url"] = relay
+    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
+    assert load_pool("openrouter").select(model=MODEL).runtime_api_key == key
+    explicit_key = key if same_key else other_key
+    if route == "fallback":
+        client, model = aux._resolve_fallback_entry({
+            "provider": "openrouter", "model": MODEL, "api_key": explicit_key, "base_url": override,
+        })
+    else:
+        client, model = aux.resolve_provider_client(
+            "openrouter", model=MODEL, explicit_api_key=explicit_key, explicit_base_url=override or None,
+        )
+    assert client is not None and model == MODEL
+    assert built[-1]["api_key"] == explicit_key
+    assert built[-1]["base_url"] == (override or (relay if same_key else aux.OPENROUTER_BASE_URL))
+    _assert_cooldown(root, "openrouter", key, OTHER, until)

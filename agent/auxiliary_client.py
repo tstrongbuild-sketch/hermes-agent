@@ -128,7 +128,7 @@ from agent.auxiliary_unavailable import (
     AuxiliaryClientUnavailable, clear_nous_credential_failure, missing_provider_credentials_message,
     nous_credential_failure_detail, record_nous_credential_failure)
 from hermes_constants import OPENROUTER_BASE_URL, hermes_home_key
-from agent.auxiliary_pool_fallback import available_pool_fallback_token
+from agent.auxiliary_pool_fallback import available_pool_fallback_token, pool_fallback_base_url
 from utils import base_url_host_matches, base_url_hostname, base_url_origin, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
@@ -2317,7 +2317,7 @@ def _try_openrouter(explicit_api_key: Optional[Union[str, Callable[[], str]]] = 
     if pool_present:
         or_key = available_pool_fallback_token("openrouter", explicit_api_key or _pool_runtime_api_key(entry), or_model)
         if or_key:
-            base_url = override_url or _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
+            base_url = override_url or pool_fallback_base_url(or_key, entry, OPENROUTER_BASE_URL)
             logger.debug("Auxiliary client: OpenRouter via pool")
             return _create_openai_client(
                 api_key=or_key, base_url=base_url, default_headers=build_or_headers()
@@ -3049,11 +3049,11 @@ def _try_anthropic(explicit_api_key: Optional[Union[str, Callable[[], str]]] = N
     model = model or _get_aux_model_for_provider("anthropic") or "claude-haiku-4-5-20251001"
     pool_present, entry = _select_pool_entry("anthropic", model=model)
     if pool_present and entry is not None:
-        token = explicit_api_key or _pool_runtime_api_key(entry)
+        token = available_pool_fallback_token("anthropic", explicit_api_key or _pool_runtime_api_key(entry), model)
     else:
         # Pool absent/empty: legacy resolver so a dead pool entry can't wedge aux tasks when a standalone credential exists.
         entry = None
-        token = explicit_api_key or resolve_anthropic_token(model=model)
+        token = available_pool_fallback_token("anthropic", explicit_api_key or resolve_anthropic_token(model=model), model)
     if not token:
         return None, None
     # Honor config.yaml model.base_url only when provider is anthropic AND the URL is
