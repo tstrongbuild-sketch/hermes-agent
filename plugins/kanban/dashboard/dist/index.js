@@ -87,7 +87,7 @@
   }
 
   // Board column display order; any backend status not listed here renders after these.
-  const COLUMN_ORDER = ["triage", "todo", "ready", "running", "blocked", "review", "done"];
+  const COLUMN_ORDER = ["triage", "todo", "ready", "running", "tim", "blocked", "review", "done"];
   // English fallback dictionaries — used when the i18n catalog is missing
   // a key, and as defaults for the get*() helpers below so callers running
   // outside any React component (where there's no `t`) still get sane text.
@@ -96,6 +96,7 @@
     todo: "Todo",
     ready: "Ready",
     running: "In Progress",
+    tim: "Tim's Column",
     blocked: "Blocked",
     review: "Review",
     done: "Done",
@@ -106,6 +107,7 @@
     todo: "Waiting on dependencies or unassigned",
     ready: "Dependencies satisfied; assign a profile to dispatch",
     running: "Claimed by a worker — in-flight",
+    tim: "Read-only owner-input queue; use kanban_block(kind='needs_input')",
     blocked: "Worker asked for human input",
     review: "Implementation complete — awaiting review",
     done: "Completed",
@@ -263,6 +265,9 @@
 
   const API = "/api/plugins/kanban";
   const MIME_TASK = "text/x-hermes-task";
+  // Derived display lanes are read-only and are not canonical statuses.
+  const DERIVED_LANES = new Set(["tim"]);
+  const isDerivedLane = function (name) { return DERIVED_LANES.has(name); };
 
   // Docs link — surfaced as a `?` icon next to the board switcher and as
   // `title=` hints on unlabelled controls. Kept in one place so rebrands or
@@ -845,6 +850,7 @@
     //           — ignored when count >  1 (bulk endpoint uses selectedIds)
     //   summary — completion summary string, or null/undefined to skip
     const performMoveTask = useCallback(function (taskId, newStatus, count, summary) {
+      if (isDerivedLane(newStatus)) return;
       const patch = { status: newStatus };
       const finalPatch = summary
         ? Object.assign({}, patch, { result: summary, summary: summary })
@@ -963,6 +969,7 @@
     // Single-task card move. Drives confirmation + completion summary
     // dialogs via the hook, then dispatches via performMoveTask.
     const moveTask = useCallback(function (taskId, newStatus) {
+      if (isDerivedLane(newStatus)) return;
       requestMoveConfirm(newStatus, 1)
         .then(function (r1) {
           if (!r1.confirmed) return null;
@@ -984,6 +991,7 @@
       setFailedIds(new Set());
     }, []);
     const moveSelected = useCallback(function (newStatus) {
+      if (isDerivedLane(newStatus)) return;
       if (selectedIds.size === 0) return;
       const count = selectedIds.size;
       const taskId = Array.from(selectedIds)[0]; // representative id for performMoveTask's single-task branch
@@ -1003,6 +1011,7 @@
     }, [selectedIds, requestMoveConfirm, requestCompletionSummary, performMoveTask]);
 
     const createTask = useCallback(function (body) {
+      if (body && isDerivedLane(body.status || body.column || body.columnName)) return Promise.resolve(null);
       return SDK.fetchJSON(withBoard(`${API}/tasks`, board), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1097,6 +1106,7 @@
 
     const applyBulk = useCallback(function (patch, confirmMsg) {
       if (selectedIds.size === 0) return;
+      if (patch && isDerivedLane(patch.status)) return;
       const count = selectedIds.size;
       const run = function () {
         const finalPatch = patch;
@@ -2959,6 +2969,7 @@
       if (!colRef.current) return undefined;
       const el = colRef.current;
       function onTouchDrop(e) {
+        if (isDerivedLane(props.column.name)) return;
         if (e.detail && e.detail.status === props.column.name) {
           const taskId = e.detail.taskId;
           if (props.selectedIds && props.selectedIds.has(taskId) && props.selectedIds.size > 1 && props.onMoveSelected) {
@@ -2973,12 +2984,14 @@
     }, [props.column.name, props.onMove, props.selectedIds, props.onMoveSelected]);
 
     const handleDragOver = function (e) {
+      if (props.column && isDerivedLane(props.column.name)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       if (!dragOver) setDragOver(true);
     };
     const handleDragLeave = function () { setDragOver(false); };
     const handleDrop = function (e) {
+      if (props.column && isDerivedLane(props.column.name)) return;
       e.preventDefault();
       setDragOver(false);
       const taskId = e.dataTransfer.getData(MIME_TASK);
@@ -3038,12 +3051,13 @@
           type: "button",
           className: "hermes-kanban-column-add",
           title: tx(t, "createTask", "Create task in this column"),
+          disabled: isDerivedLane(props.column.name),
           onClick: function () { setShowCreate(function (v) { return !v; }); },
         }, showCreate ? "×" : "+"),
       ),
       h("div", { className: "hermes-kanban-column-sub" },
         colHelp || ""),
-      showCreate ? h(InlineCreate, {
+      showCreate && !isDerivedLane(props.column.name) ? h(InlineCreate, {
         columnName: props.column.name,
         allTasks: props.allTasks,
         defaultWorkspaceKind: (props.boardMeta && props.boardMeta.default_workspace_kind) || "scratch",

@@ -16,10 +16,10 @@ type KanbanMessages = {
   newTaskCommand: string
   countTip: (running: number, ready: number) => string
   col: Record<
-    'archived' | 'blocked' | 'done' | 'ready' | 'review' | 'running' | 'scheduled' | 'todo' | 'triage',
+    'archived' | 'blocked' | 'done' | 'ready' | 'review' | 'running' | 'scheduled' | 'tim' | 'todo' | 'triage',
     { label: string; help: string }
   >
-  locked: { review: string; running: string; scheduled: string }
+  locked: { review: string; running: string; scheduled: string; tim: string }
   arcRunning: string
   arcStale: string
   title: string
@@ -240,6 +240,10 @@ export const en: KanbanMessages = {
     scheduled: { label: 'Scheduled', help: 'Waiting for a scheduled time to arrive.' },
     ready: { label: 'Ready', help: 'Dependencies satisfied — assign a profile and the dispatcher runs it.' },
     running: { label: 'Running', help: 'Claimed by a worker — an agent is on it. Set by the dispatcher.' },
+    tim: {
+      label: "Tim's Column",
+      help: "Read-only owner-input queue. Use kanban_block(kind='needs_input') to route a card here."
+    },
     blocked: { label: 'Blocked', help: 'The worker asked for human input.' },
     review: { label: 'Review', help: 'A review agent is checking the work. Set by the dispatcher.' },
     done: { label: 'Done', help: 'Completed; dependent children become ready.' },
@@ -248,7 +252,8 @@ export const en: KanbanMessages = {
   locked: {
     review: 'Review is entered by the dispatcher when a review agent takes the card.',
     running: 'Running is set by the dispatcher when a worker claims the card.',
-    scheduled: 'Scheduled needs a wake-up time — agents set it; it can’t be dragged into.'
+    scheduled: 'Scheduled needs a wake-up time — agents set it; it can’t be dragged into.',
+    tim: "Tim's Column is read-only; use kanban_block(kind='needs_input')."
   },
   arcRunning: 'An agent is working on this now.',
   arcStale: 'Claimed, but no worker heartbeat for 2+ minutes — the dispatcher will reclaim it.',
@@ -472,6 +477,10 @@ const ja: KanbanMessages = {
     scheduled: { label: 'スケジュール', help: '予定時刻を待っています。' },
     ready: { label: 'Ready', help: '依存関係が解決済み — プロフィールを割り当てるとディスパッチャが実行します。' },
     running: { label: '実行中', help: 'ワーカーが取得済み — エージェントが作業中。ディスパッチャが設定します。' },
+    tim: {
+      label: "Tim's Column",
+      help: "Read-only owner-input queue. Use kanban_block(kind='needs_input') to route a card here."
+    },
     blocked: { label: 'ブロック', help: 'ワーカーが人間の入力を求めています。' },
     review: { label: 'レビュー', help: 'レビューエージェントが作業を確認中。ディスパッチャが設定します。' },
     done: { label: '完了', help: '完了。依存する子タスクが Ready になります。' },
@@ -480,7 +489,8 @@ const ja: KanbanMessages = {
   locked: {
     review: 'レビューは、レビューエージェントがカードを取得するとディスパッチャによって設定されます。',
     running: '実行中は、ワーカーがカードを取得するとディスパッチャによって設定されます。',
-    scheduled: 'スケジュールには起動時刻が必要です — エージェントが設定します。ドラッグでは移動できません。'
+    scheduled: 'スケジュールには起動時刻が必要です — エージェントが設定します。ドラッグでは移動できません。',
+    tim: "Tim's Column is read-only; use kanban_block(kind='needs_input')."
   },
   arcRunning: 'エージェントが現在作業中です。',
   arcStale: '取得済みですが、2分以上ワーカーのハートビートがありません — ディスパッチャが再取得します。',
@@ -703,6 +713,10 @@ const zh: KanbanMessages = {
     scheduled: { label: '已排期', help: '等待预定时间到来。' },
     ready: { label: '就绪', help: '依赖已满足 — 分配一个配置档，调度器即会运行它。' },
     running: { label: '运行中', help: '已被工作单元领取 — 有代理在处理。由调度器设置。' },
+    tim: {
+      label: "Tim's Column",
+      help: "Read-only owner-input queue. Use kanban_block(kind='needs_input') to route a card here."
+    },
     blocked: { label: '受阻', help: '工作单元需要人工输入。' },
     review: { label: '审查', help: '审查代理正在检查工作。由调度器设置。' },
     done: { label: '完成', help: '已完成；依赖它的子任务变为就绪。' },
@@ -711,7 +725,8 @@ const zh: KanbanMessages = {
   locked: {
     review: '审查状态由调度器在审查代理领取卡片时设置。',
     running: '运行中由调度器在工作单元领取卡片时设置。',
-    scheduled: '排期需要唤醒时间 — 由代理设置；无法拖入。'
+    scheduled: '排期需要唤醒时间 — 由代理设置；无法拖入。',
+    tim: "Tim's Column is read-only; use kanban_block(kind='needs_input')."
   },
   arcRunning: '有代理正在处理它。',
   arcStale: '已领取，但超过 2 分钟没有工作单元心跳 — 调度器将重新领取。',
@@ -931,6 +946,10 @@ const zhHant: KanbanMessages = {
     scheduled: { label: '已排程', help: '等待預定時間到來。' },
     ready: { label: '就緒', help: '相依項目已滿足 — 指派一個設定檔，排程器便會執行它。' },
     running: { label: '執行中', help: '已被工作單元領取 — 有代理在處理。由排程器設定。' },
+    tim: {
+      label: "Tim's Column",
+      help: "Read-only owner-input queue. Use kanban_block(kind='needs_input') to route a card here."
+    },
     blocked: { label: '受阻', help: '工作單元需要人工輸入。' },
     review: { label: '審查', help: '審查代理正在檢查工作。由排程器設定。' },
     done: { label: '完成', help: '已完成；相依它的子任務變為就緒。' },
@@ -939,7 +958,8 @@ const zhHant: KanbanMessages = {
   locked: {
     review: '審查狀態由排程器在審查代理領取卡片時設定。',
     running: '執行中由排程器在工作單元領取卡片時設定。',
-    scheduled: '排程需要喚醒時間 — 由代理設定；無法拖入。'
+    scheduled: '排程需要喚醒時間 — 由代理設定；無法拖入。',
+    tim: "Tim's Column is read-only; use kanban_block(kind='needs_input')."
   },
   arcRunning: '有代理正在處理它。',
   arcStale: '已領取，但超過 2 分鐘沒有工作單元心跳 — 排程器將重新領取。',

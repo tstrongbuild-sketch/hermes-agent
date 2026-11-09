@@ -67,9 +67,11 @@ def test_board_empty(client):
     r = client.get("/api/plugins/kanban/board")
     assert r.status_code == 200
     data = r.json()
-    # All canonical columns present (triage + the rest), each empty.
+    # All canonical columns plus the derived Tim lane are present, each empty.
     names = [c["name"] for c in data["columns"]]
-    assert set(names) == kb.VALID_STATUSES - {"archived"}
+    assert set(names) == (kb.VALID_STATUSES - {"archived"}) | {"tim"}
+    assert names.index("tim") == names.index("running") + 1
+    assert names.index("blocked") == names.index("tim") + 1
     for expected in ("triage", "todo", "scheduled", "ready", "running", "blocked", "done"):
         assert expected in names, f"missing column {expected}: {names}"
     assert all(len(c["tasks"]) == 0 for c in data["columns"])
@@ -79,6 +81,26 @@ def test_board_empty(client):
     # present even on an empty board (no task-holders yet).
     assert data["assignees"] == ["default"]
     assert data["latest_event_id"] == 0
+
+
+def test_board_partitions_needs_input_into_tim_without_duplicates(client):
+    tasks = [client.post("/api/plugins/kanban/tasks", json={"title": title}).json()["task"]
+             for title in ("owner input", "generic block", "capability block")]
+    conn = kbc.connect()
+    try:
+        with kb.write_txn(conn):
+            conn.executemany(
+                "UPDATE tasks SET status = 'blocked', block_kind = ? WHERE id = ?",
+                [("needs_input", tasks[0]["id"]), (None, tasks[1]["id"]), ("capability", tasks[2]["id"])],
+            )
+    finally:
+        conn.close()
+
+    columns = {column["name"]: column["tasks"] for column in client.get("/api/plugins/kanban/board").json()["columns"]}
+    assert [task["id"] for task in columns["tim"]] == [tasks[0]["id"]]
+    assert {task["id"] for task in columns["blocked"]} == {tasks[1]["id"], tasks[2]["id"]}
+    all_ids = [task["id"] for lane in columns.values() for task in lane]
+    assert len(all_ids) == len(set(all_ids)) == 3
 
 # ---------------------------------------------------------------------------
 # POST /tasks then GET /board sees it

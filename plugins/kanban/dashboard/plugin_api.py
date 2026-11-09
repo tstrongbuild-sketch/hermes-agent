@@ -174,6 +174,7 @@ def _errors_to_500(prefix: str) -> Iterator[None]:
 # Dashboard columns, left-to-right ("archived" is a filter toggle, not a column), from the
 # one workflow definition. A status missing here gets mis-bucketed into ``todo``.
 BOARD_COLUMNS: list[str] = list(kanban_workflow.DEFAULT_WORKFLOW.keys())
+TIM_COLUMN = "tim"
 
 _CARD_SUMMARY_PREVIEW_CHARS = 200
 
@@ -314,7 +315,10 @@ def get_board(
             p["done"] += row["cstatus"] == "done"
         diagnostics_per_task = _compute_task_diagnostics(conn, task_ids=None)
         latest_event_id = conn.execute("SELECT COALESCE(MAX(id), 0) AS m FROM task_events").fetchone()["m"]
+        # Derived display lane: never add ``tim`` to the canonical workflow.
+        # Only typed owner-input blocks are routed here.
         columns: dict[str, list[dict]] = {c: [] for c in BOARD_COLUMNS}
+        columns[TIM_COLUMN] = []
         if include_archived:
             columns["archived"] = []
         # One window-function query for latest summaries (avoids N+1); cards get a
@@ -331,7 +335,10 @@ def get_board(
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
             _attach_diagnostics(d, diagnostics_per_task.get(t.id))
-            columns[t.status if t.status in columns else "todo"].append(d)
+            if t.status == "blocked" and t.block_kind == "needs_input":
+                columns[TIM_COLUMN].append(d)
+            else:
+                columns[t.status if t.status in BOARD_COLUMNS else "todo"].append(d)
 
         # Queue lanes keep the list_tasks dispatch order; the done column is
         # history, so order it newest-completed-first. Two stable sorts compose
@@ -349,7 +356,13 @@ def get_board(
         # which already uses this helper.
         assignees = [entry["name"] for entry in kanban_db.known_assignees(conn)]
         return {
-            "columns": [{"name": name, "tasks": columns[name]} for name in columns], "tenants": tenants,
+            "columns": [
+                *({"name": name, "tasks": columns[name]} for name in BOARD_COLUMNS[:BOARD_COLUMNS.index("blocked")]),
+                {"name": TIM_COLUMN, "tasks": columns[TIM_COLUMN]},
+                {"name": "blocked", "tasks": columns["blocked"]},
+                *({"name": name, "tasks": columns[name]} for name in BOARD_COLUMNS[BOARD_COLUMNS.index("blocked") + 1:]),
+                *([{"name": "archived", "tasks": columns["archived"]}] if include_archived else []),
+            ], "tenants": tenants,
             "assignees": assignees, "latest_event_id": int(latest_event_id), "now": int(time.time())}
 
 

@@ -176,7 +176,10 @@ KANBAN_BLOCK_SCHEMA = _schema(
         "``reason`` is shown to the human on the board. If a task keeps "
         "getting unblocked and re-blocked for the same reason, it is "
         "auto-escalated to triage. Use for genuine blockers only — don't "
-        "block on things you can resolve yourself."
+        "block on things you can resolve yourself. On the Kanban board, only "
+        "``kind='needs_input'`` is routed to Tim's Column; capability, "
+        "transient, dependency, review, and generic blocked work stays out "
+        "of that read-only lane."
     ),
     {
         "task_id": _prop("string", _DESC_TASK_ID_DEFAULT),
